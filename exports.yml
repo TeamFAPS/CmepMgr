@@ -1,0 +1,18 @@
+CmepMgr:
+  attributes: 7
+  version:
+    major: 1
+    minor: 1
+  main:
+    start: module_start
+  modules:
+    CmepMgrForKernel:
+      version: 1
+      syscall: false
+      functions:
+        - cmepMgrStart
+        - cmepMgrStartByPath
+        - cmepMgrStop
+        - cmepMgrCallFunc
+        - cmepMgrDcacheCleanRange
+        - cmepMgrDcacheInvalidateRange
