@@ -186,13 +186,31 @@ const unsigned int list_0xD0002_corrupt_addr[] = {
 	0x4BD20
 };
 
+const unsigned int list_0xD0002_corrupt_addr_371[] = {
+	0x4BD74,
+	0x4BD78,
+	0x4BD7C,
+	0x4BD80,
+	0x4BD84
+};
+
 int cmepMgrOpen(void){
 
 	int res;
 
 	res = start_sm_update();
-	if(res >= 0)
-		res = corrupt_nwords(list_0xD0002_corrupt_addr, 5);
+	if(res >= 0){
+		SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
+		if(pKblParam->current_fw_version >= 0x3600000 && pKblParam->current_fw_version < 0x3710000){
+			res = corrupt_nwords(list_0xD0002_corrupt_addr, 5);
+			ksceDebugPrintf("corrupt_nwords for 360\n");
+		}else if(pKblParam->current_fw_version >= 0x3710000 && pKblParam->current_fw_version < 0x3740000){
+			res = corrupt_nwords(list_0xD0002_corrupt_addr_371, 5);
+			ksceDebugPrintf("corrupt_nwords for 371\n");
+		}else{
+			// TODO: Add kernel panic
+		}
+	}
 
 #if CMEP_MGR_DBG_LOG != 0
 	ksceDebugPrintf("%s 0x%X\n", __FUNCTION__, res);
@@ -249,6 +267,13 @@ int _cmepMgrCallFunc(int cmd, void *argp, SceSize argp_length){
 	ksceKernelGetPaddr(cmep_args_base, (uintptr_t *)&cmd_arg.unk_4);
 	cmd_arg.unk_8[0] = cmd;
 
+	SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
+	if(pKblParam->current_fw_version >= 0x3710000 && pKblParam->current_fw_version < 0x3740000){
+		cmd_arg.unk_8[1] = cmd_arg.mode;
+		ksceKernelGetPaddr(&(cmd_arg.unk_8[1]), (uintptr_t *)&cmd_arg.mode);
+	}
+
+	cmepMgrDcacheCleanRange(&cmd_arg, sizeof(cmd_arg));
 	cmepMgrDcacheCleanRange(cmep_args_base, CMEP_MGR_ARGS_SIZE);
 
 	res = ksceSblSmCommCallFunc(update_sm_id, 0xD0002, &resp, &cmd_arg, sizeof(cmd_arg));
@@ -281,16 +306,31 @@ SceUInt32 bit_start_from_left(SceUInt32 value){
 }
 
 const unsigned char cmep_stage1_payload[] = {
-	0x21, 0xC0, 0x22, 0x11,	// movh r0, 0x1122
-	0x04, 0xC0, 0x44, 0x33,	// or3  r0, 0x3344, low addr
-	0x0F, 0x10,		// jsr  r0
-	0x96, 0xD3, 0xBE, 0x80,	// movu r3, 0x80BE96(0xD0002 return)
-	0x3E, 0x10		// jmp  r3
+	0x21, 0xC0, 0x22, 0x11, // movh r0, 0x1122
+	0x04, 0xC0, 0x44, 0x33, // or3  r0, 0x3344, low addr
+	0x0F, 0x10,             // jsr  r0
+	0x96, 0xD3, 0xBE, 0x80, // movu r3, 0x80BE96 (0xD0002 return)
+	0x3E, 0x10              // jmp  r3
 };
 
 int cmepMgrSetStage2Address(void *base, uintptr_t PA){
 
+	SceUIntPtr ret_point;
+
 	memcpy(base, cmep_stage1_payload, sizeof(cmep_stage1_payload));
+
+	SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
+	if(pKblParam->current_fw_version >= 0x3600000 && pKblParam->current_fw_version < 0x3710000){
+		ret_point = 0x80BE96;
+	}else if(pKblParam->current_fw_version >= 0x3710000 && pKblParam->current_fw_version < 0x3740000){
+		ret_point = 0x80BEFC;
+	}else{
+		ret_point = 0; // TODO : Replace to kernel panic
+	}
+
+	((char *)base)[10] = (char)(ret_point);
+	((char *)base)[12] = (char)(ret_point >> 8);
+	((char *)base)[13] = (char)(ret_point >> 16);
 
 	((char *)base)[6] = (char)(PA);
 	((char *)base)[7] = (char)(PA >> 8);
@@ -553,40 +593,54 @@ int cmepMgrCallFunc(int cmd, void *arg, SceSize arg_len){
 int cmepMgrInitialize(void){
 
 	int res;
+	SceKblParam *pKblParam;
+	SceUInt32 version;
 
-	SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
-	if(pKblParam->current_fw_version != 0x3600000)
+	pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
+	if(pKblParam == NULL){
 		return -1;
+	}
+
+	version = pKblParam->current_fw_version;
+	if(version < 0x3600000 || version > 0x3740000){
+		return -1;
+	}
 
 	res = ksceKernelAllocMemBlock("CmepMgrArgs", 0x10208006, CMEP_MGR_ARGS_SIZE, NULL);
-	if(res < 0)
+	if(res < 0){
 		return res;
+	}
 
 	cmep_args_uid = res;
 
 	res = ksceKernelGetMemBlockBase(cmep_args_uid, &cmep_args_base);
-	if(res < 0)
+	if(res < 0){
 		return res;
+	}
 
 	res = ksceKernelAllocMemBlock("CmepMgrStage1Base", 0x10208006, 0x1000, NULL);
-	if(res < 0)
+	if(res < 0){
 		return res;
+	}
 
 	cmep_stage1_base_uid = res;
 
 	res = ksceKernelGetMemBlockBase(cmep_stage1_base_uid, &cmep_stage1_base);
-	if(res < 0)
+	if(res < 0){
 		return res;
+	}
 
 	res = ksceKernelCreateMutex("CmepMgrLock", 0, 0, NULL);
-	if(res < 0)
+	if(res < 0){
 		return res;
+	}
 
 	mtx_lock = res;
 
 	res = ksceKernelCreateSema("CmepMgrApi", 0, 1, 1, 0);
-	if(res < 0)
+	if(res < 0){
 		return res;
+	}
 
 	global_sema = res;
 
