@@ -201,14 +201,14 @@ int cmepMgrOpen(void){
 	res = start_sm_update();
 	if(res >= 0){
 		SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
-		if(pKblParam->current_fw_version >= 0x3600000 && pKblParam->current_fw_version < 0x3710000){
+		if(pKblParam->current_fw_version >= 0x3200000 && pKblParam->current_fw_version < 0x3710000){
 			res = corrupt_nwords(list_0xD0002_corrupt_addr, 5);
 			ksceDebugPrintf("corrupt_nwords for 360\n");
 		}else if(pKblParam->current_fw_version >= 0x3710000 && pKblParam->current_fw_version < 0x3740000){
 			res = corrupt_nwords(list_0xD0002_corrupt_addr_371, 5);
 			ksceDebugPrintf("corrupt_nwords for 371\n");
 		}else{
-			// TODO: Add kernel panic
+			SCE_KERNEL_PANIC();
 		}
 	}
 
@@ -229,27 +229,11 @@ int cmepMgrClose(void){
 }
 
 void cmepMgrDcacheCleanRange(const void *ptr, SceSize size){
-
-	size = ((size + 0x3F) & ~0x3F);
-
-	if((((uintptr_t)ptr) & 0x3F) != 0){
-		ptr = (const void *)(((uintptr_t)ptr) & ~0x3F);
-		size += 0x40;
-	}
-
-	ksceKernelCpuDcacheAndL2WritebackRange(((void *)ptr), size);
+	ksceKernelCpuDcacheAndL2WritebackRange((void *)(((uintptr_t)ptr) & ~0x3F), (size + (((uintptr_t)ptr) & 0x3F) + 0x3F) & ~0x3F);
 }
 
 void cmepMgrDcacheInvalidateRange(const void *ptr, SceSize size){
-
-	size = ((size + 0x3F) & ~0x3F);
-
-	if((((uintptr_t)ptr) & 0x3F) != 0){
-		ptr = (const void *)(((uintptr_t)ptr) & ~0x3F);
-		size += 0x40;
-	}
-
-	ksceKernelCpuDcacheAndL2InvalidateRange(((void *)ptr), size);
+	ksceKernelCpuDcacheAndL2InvalidateRange((void *)(((uintptr_t)ptr) & ~0x3F), (size + (((uintptr_t)ptr) & 0x3F) + 0x3F) & ~0x3F);
 }
 
 int _cmepMgrCallFunc(int cmd, void *argp, SceSize argp_length){
@@ -320,12 +304,12 @@ int cmepMgrSetStage2Address(void *base, uintptr_t PA){
 	memcpy(base, cmep_stage1_payload, sizeof(cmep_stage1_payload));
 
 	SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
-	if(pKblParam->current_fw_version >= 0x3600000 && pKblParam->current_fw_version < 0x3710000){
+	if(pKblParam->current_fw_version >= 0x3200000 && pKblParam->current_fw_version < 0x3710000){
 		ret_point = 0x80BE96;
 	}else if(pKblParam->current_fw_version >= 0x3710000 && pKblParam->current_fw_version < 0x3740000){
 		ret_point = 0x80BEFC;
 	}else{
-		ret_point = 0; // TODO : Replace to kernel panic
+		SCE_KERNEL_PANIC();
 	}
 
 	((char *)base)[10] = (char)(ret_point);
@@ -602,7 +586,7 @@ int cmepMgrInitialize(void){
 	}
 
 	version = pKblParam->current_fw_version;
-	if(version < 0x3600000 || version > 0x3740000){
+	if(version < 0x3200000 || version > 0x3740000){
 		return -1;
 	}
 
