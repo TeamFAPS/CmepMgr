@@ -5,17 +5,18 @@
 
 #include <psp2kern/kernel/threadmgr.h>
 #include <psp2kern/kernel/sysmem.h>
+#include <psp2kern/kernel/debug.h>
 #include <psp2kern/kernel/sysclib.h>
 #include <psp2kern/kernel/sysroot.h>
 #include <psp2kern/kernel/cpu.h>
+#include <psp2kern/kernel/sm_comm.h>
 #include <psp2kern/kernel/iofilemgr.h>
+#include <psp2kern/sblacmgr.h>
 #include <psp2kern/io/fcntl.h>
 #include "cmep_mgr.h"
 #include "cmep_mgr_internal.h"
 #include "update_service.h"
-#include "sce_self_info.h"
 
-int ksceSblACMgrGetPathId(const char *path, int *pathId);
 
 const SceSelfAuthInfo update_sm = {
 	.program_authority_id = 0x2808000000000001,
@@ -39,19 +40,9 @@ const SceSelfAuthInfo update_sm = {
 	}
 };
 
-typedef struct SceSblSmCommPair {
-	int data_00;
-	int data_04;
-} SceSblSmCommPair;
-
-int ksceSblSmCommStartSmFromFile(int priority, const char *sm_path, int cmd_id, SceSblSmCommContext130 *ctx130, int *id);
-
-int ksceSblSmCommCallFunc(int id, int service_id, int *f00d_resp, void *data, SceSize size);
-int ksceSblSmCommStopSm(int id, SceSblSmCommPair *result);
-
 #define CMEP_MGR_ARGS_SIZE (0x1000)
 
-int update_sm_id;
+SceSblSmCommId update_sm_id;
 
 SceUID cmep_stage1_base_uid;
 void  *cmep_stage1_base;
@@ -71,7 +62,7 @@ SceKernelPaddrList payload_paddr_list __attribute__((aligned(0x40)));
 int start_sm_update(void){
 
 	int res;
-	SceSblSmCommContext130 ctx130;
+	SceAuthInfo auth_info;
 
 #if CMEP_MGR_DBG_LOG != 0
 	ksceDebugPrintf("%s in <-\n", __FUNCTION__);
@@ -87,31 +78,31 @@ int start_sm_update(void){
 
 	ksceDebugPrintf("Stack base : %p\n", info.stack);
 	ksceDebugPrintf("Stack size : 0x%08X\n", info.stackSize);
-	ksceDebugPrintf("Current stack point : %p\n", &ctx130);
+	ksceDebugPrintf("Current stack point : %p\n", &auth_info);
 #endif
 
 	int perm;
 
 	perm = ksceKernelSetPermission(0x80);
 
-	memset(&ctx130, 0, sizeof(ctx130));
-	memcpy(&ctx130.caller_self_auth_info, &update_sm, sizeof(update_sm));
+	memset(&auth_info, 0, sizeof(auth_info));
+	memcpy(&auth_info.request, &update_sm, sizeof(update_sm));
 
-	res = ksceSblACMgrGetPathId("os0:sm/update_service_sm.self", &ctx130.path_id);
+	res = ksceSblACMgrGetMediaType("os0:sm/update_service_sm.self", &(auth_info.media_type));
 	if(res != 0){
 #if CMEP_MGR_DBG_LOG != 0
-	ksceDebugPrintf("%s sceSblACMgrGetPathId failed : 0x%X\n", __FUNCTION__, res);
+		ksceDebugPrintf("%s sceSblACMgrGetMediaType failed : 0x%X\n", __FUNCTION__, res);
 #endif
 		goto error;
 	}
 
-	ctx130.self_type = (ctx130.self_type & ~0xF) | 2;	
+	auth_info.self_type = (auth_info.self_type & ~0xF) | 2;	
 
 #if CMEP_MGR_DBG_LOG != 0
 	ksceDebugPrintf("%s loading update_service_sm...\n", __FUNCTION__);
 #endif
 
-	res = ksceSblSmCommStartSmFromFile(0, "os0:sm/update_service_sm.self", 0, &ctx130, &update_sm_id);
+	res = ksceSblSmCommStartSmFromFile(0, "os0:sm/update_service_sm.self", 0, &auth_info, &update_sm_id);
 
 #if CMEP_MGR_DBG_LOG != 0
 	ksceDebugPrintf("%s out ->\n", __FUNCTION__);
@@ -201,7 +192,7 @@ int cmepMgrOpen(void){
 	res = start_sm_update();
 	if(res >= 0){
 		SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
-		if(pKblParam->current_fw_version >= 0x3200000 && pKblParam->current_fw_version < 0x3710000){
+		if(pKblParam->current_fw_version >= 0x3000000 && pKblParam->current_fw_version < 0x3710000){
 			res = corrupt_nwords(list_0xD0002_corrupt_addr, 5);
 			ksceDebugPrintf("corrupt_nwords for 360\n");
 		}else if(pKblParam->current_fw_version >= 0x3710000 && pKblParam->current_fw_version < 0x3740000){
@@ -304,7 +295,7 @@ int cmepMgrSetStage2Address(void *base, uintptr_t PA){
 	memcpy(base, cmep_stage1_payload, sizeof(cmep_stage1_payload));
 
 	SceKblParam *pKblParam = (SceKblParam *)ksceKernelSysrootGetKblParam();
-	if(pKblParam->current_fw_version >= 0x3200000 && pKblParam->current_fw_version < 0x3710000){
+	if(pKblParam->current_fw_version >= 0x3000000 && pKblParam->current_fw_version < 0x3710000){
 		ret_point = 0x80BE96;
 	}else if(pKblParam->current_fw_version >= 0x3710000 && pKblParam->current_fw_version < 0x3740000){
 		ret_point = 0x80BEFC;
@@ -586,7 +577,7 @@ int cmepMgrInitialize(void){
 	}
 
 	version = pKblParam->current_fw_version;
-	if(version < 0x3200000 || version > 0x3740000){
+	if(version < 0x3000000 || version > 0x3740000){
 		return -1;
 	}
 
