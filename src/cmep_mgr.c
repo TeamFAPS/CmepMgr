@@ -220,11 +220,11 @@ int cmepMgrClose(void){
 }
 
 void cmepMgrDcacheCleanRange(const void *ptr, SceSize size){
-	ksceKernelCpuDcacheAndL2WritebackRange((void *)(((uintptr_t)ptr) & ~0x3F), (size + (((uintptr_t)ptr) & 0x3F) + 0x3F) & ~0x3F);
+	ksceKernelDcacheCleanRange((void *)(((uintptr_t)ptr) & ~0x3F), (size + (((uintptr_t)ptr) & 0x3F) + 0x3F) & ~0x3F);
 }
 
 void cmepMgrDcacheInvalidateRange(const void *ptr, SceSize size){
-	ksceKernelCpuDcacheAndL2InvalidateRange((void *)(((uintptr_t)ptr) & ~0x3F), (size + (((uintptr_t)ptr) & 0x3F) + 0x3F) & ~0x3F);
+	ksceKernelDcacheInvalidateRange((void *)(((uintptr_t)ptr) & ~0x3F), (size + (((uintptr_t)ptr) & 0x3F) + 0x3F) & ~0x3F);
 }
 
 int _cmepMgrCallFunc(int cmd, void *argp, SceSize argp_length){
